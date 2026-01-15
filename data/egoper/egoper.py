@@ -4,10 +4,7 @@ from functools import reduce
 from transformers import pipeline
 
 
-class EGOEXO4D:
-    # root = "datasets/egoexo4d/"
-    # video_root = os.path.join(root, "videos")
-    # anno_root = os.path.join(root, "instructions")
+class EgoPER:
 
     def __init__(
         self,
@@ -21,8 +18,8 @@ class EGOEXO4D:
         # self.root = os.path.join(dataset_dir, "egoexo4d")
         self.root = dataset_dir
 
-        self.video_root = os.path.join(self.root, "egoexo4d/videos")
-        self.anno_root = os.path.join(self.root, "egoexo4d/instructions")
+        self.video_root = os.path.join(self.root, "egoper/videos")
+        self.anno_root = os.path.join(self.root, "egoper/instructions")
 
         self.frame_fps = frame_fps
 
@@ -33,7 +30,6 @@ class EGOEXO4D:
             open(os.path.join(self.anno_root, f"instructions_{self.split}.json"))
         )
         file_map = self._create_file_map(self.anno_root, self.video_root)
-
         self._annos = [
             {
                 "index": anno["id"],
@@ -43,7 +39,6 @@ class EGOEXO4D:
                 "question": anno["question"],
                 "start_frame": anno["start_frame"],
                 "end_frame": anno["end_frame"],
-                "answer_id": anno["answer_id"],
                 "video_path": file_map[anno["video_id"]],
             }
             for anno in annos
@@ -66,20 +61,20 @@ class EGOEXO4D:
 
     @staticmethod
     def _create_file_map(anno_path, video_path):
-        trainval_meta = json.load(
-            open(os.path.join(anno_path, f"instructions_trainval.json"))
-        )
-        test_meta = json.load(open(os.path.join(anno_path, f"instructions_test.json")))
-        metadata = trainval_meta + test_meta
-        name_id_map = {meta["video_name"]: meta["video_id"] for meta in metadata}
+        # trainval_meta = json.load(
+        #     open(os.path.join(anno_path, f"instructions_trainval.json"))
+        # )
+        # test_meta = json.load(open(os.path.join(anno_path, f"instructions_test.json")))
+        # metadata = trainval_meta + test_meta
+        # name_id_map = {meta["video_name"]: meta["video_id"] for meta in metadata}
 
         file_map = dict()
         files = glob.glob(os.path.join(video_path, "*"))
 
         for f in files:
-            video_id = os.path.basename(f).replace("_rgb", "").replace(".pt", "")
-            if video_id in name_id_map:
-                video_id = name_id_map[video_id]
+            video_id = os.path.basename(f).replace(".mp4", "")
+            # if video_id in name_id_map:
+            #     video_id = name_id_map[video_id]
             if video_id not in file_map:
                 file_map[video_id] = f
         return file_map

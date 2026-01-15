@@ -83,7 +83,7 @@ class LiveLlamaForCausalLM(LlamaForCausalLM, LiveMixin):
         cache_position: torch.LongTensor = None,
         **kwargs,
     ):
-        if inputs_embeds is None:
+        if inputs_embeds is None: # check if inputs_embeds is None
             inputs_embeds, det, meta = self.joint_embed(input_ids, frames)
 
         outputs = super().forward(
@@ -106,7 +106,7 @@ class LiveLlamaForCausalLM(LlamaForCausalLM, LiveMixin):
             v_mask = input_ids.flatten(0, 1) == self.config.v_placeholder_id
 
             weight = v_mask * self.config.stream_loss_weight + ~v_mask
-
+            
             lm_loss = (
                 nn.functional.cross_entropy(
                     logits.flatten(0, 1), labels.flatten(), reduction="none"
@@ -118,9 +118,13 @@ class LiveLlamaForCausalLM(LlamaForCausalLM, LiveMixin):
         # ----- BBox loss -----
         bbox_loss = None
         box_w = 0.0
-        if bboxes is not None:
+        if bboxes is not None and self.training:
             bbox_loss = self.compute_bbox_loss(bboxes, det, meta)
             box_w = getattr(self.config, "box_loss_weight", 1.0)
+
+            if bboxes.sum() == 0:
+                print("no detection")
+                print(bbox_loss)
 
         loss = (
             ((lm_loss or 0.0) + box_w * (bbox_loss or 0.0))

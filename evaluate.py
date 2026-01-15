@@ -5,6 +5,8 @@ from engine import StopEvaluationAfterOneStepCallback, TrainerWithGenToEval
 
 from models import build_model_and_tokenizer, parse_args
 
+import json
+import os
 
 def evaluate():
     args = parse_args()
@@ -29,19 +31,23 @@ def evaluate():
         args=args,
         eval_dataset=eval_dataset_dict,
         data_collator=data_collator,
-        compute_metrics=compute_metrics_dict[list(compute_metrics_dict.keys())[0]],
+        compute_metrics=compute_metrics_dict[list(compute_metrics_dict.keys())[0]], # EgoClipStage1.compute_metrics
     )
 
     metrics = {}
     for eval_dataset_name, eval_dataset in eval_dataset_dict.items():
-        trainer.compute_metrics = compute_metrics_dict[eval_dataset_name]
+        trainer.compute_metrics = compute_metrics_dict[eval_dataset_name] # each dataset has its own compute_metrics
         dataset_metrics = trainer.evaluate(
             eval_dataset=eval_dataset,
             metric_key_prefix=f"eval_{eval_dataset_name}",
         )
         metrics.update(dataset_metrics)
-        print(dataset_metrics)
-    print(metrics)
+        print("dataset metrics:", dataset_metrics)
+
+        with open(os.path.join(args.output_dir, "results.json"), "w") as f:
+            json.dump(dataset_metrics, f, indent=4)
+
+    # print(metrics)
 
 
 if __name__ == "__main__":

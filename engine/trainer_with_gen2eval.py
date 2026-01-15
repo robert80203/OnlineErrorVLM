@@ -19,8 +19,13 @@ class TrainerWithGenToEval(Trainer):
                 return (loss, None, None)
             sample_idxs = inputs.pop("sample_idxs")
             evaluation_kwargs = inputs.pop("evaluation_kwargs")
-            evaluator = evaluation_kwargs.pop("evaluator")
+            evaluator = evaluation_kwargs.pop("evaluator") # it returns generate_after_embed
 
+            ## output
+            '''
+            evaluation_kwargs: {'max_new_tokens': 512, 'do_sample': False, 'use_cache': True, 'temperature': 1.0, 'top_p': 1.0}
+            evaluator: generate_after_embed
+            '''
             output_ids, det, meta = getattr(model, evaluator)(
                 **inputs,
                 **evaluation_kwargs,
@@ -29,6 +34,36 @@ class TrainerWithGenToEval(Trainer):
             )
             return (None, output_ids.reshape(1, -1), sample_idxs)
 
+############ Shih-Po's implementation
+class TrainerWithOnlineGenToEval(Trainer):
+    def prediction_step(
+        self,
+        model: torch.nn.Module,
+        inputs: dict,
+        prediction_loss_only: bool,
+        ignore_keys: list[str] = None,
+    ):
+        with torch.no_grad(), self.compute_loss_context_manager():
+            inputs = self._prepare_inputs(inputs)
+            if prediction_loss_only:  # False by default
+                loss = self.compute_loss(model, inputs, return_outputs=False)
+                return (loss, None, None)
+            sample_idxs = inputs.pop("sample_idxs")
+            evaluation_kwargs = inputs.pop("evaluation_kwargs")
+            evaluator = evaluation_kwargs.pop("evaluator") # it returns generate_after_embed
+
+            ## output
+            '''
+            evaluation_kwargs: {'max_new_tokens': 512, 'do_sample': False, 'use_cache': True, 'temperature': 1.0, 'top_p': 1.0}
+            evaluator: generate_after_embed
+            '''
+            output_ids, det, meta = getattr(model, evaluator)(
+                **inputs,
+                **evaluation_kwargs,
+                pad_token_id=self.tokenizer.pad_token_id,
+                eos_token_id=self.tokenizer.eos_token_id
+            )
+            return (None, output_ids.reshape(1, -1), sample_idxs)
 
 class StopTrainingAfterOneStepCallback(TrainerCallback):
     """A callback that stops the training loop after one step for debugging purposes."""

@@ -10,12 +10,31 @@ def get_stream_placeholder_len(num_frames: int, model_config: LiveConfigMixin) -
         model_config.v_placeholder
     ) + len(model_config.frame_token_interval) * (num_frames - 1)
 
+#### Shih-Po's implementation
+def get_stream_interleave_placeholder_len(num_frames: int, long_context: list, model_config: LiveConfigMixin) -> str:
+    v_offset = num_frames * model_config.frame_num_tokens * len(model_config.v_placeholder) + len(model_config.frame_token_interval) * (num_frames - 1)
+
+    l_offset = 0
+    for step in long_context:
+        l_offset += len(step)
+    l_offset += model_config.N_l * len(model_config.long_placeholder) + model_config.N_l * len(model_config.frame_token_interval)
+
+    return v_offset + l_offset
+
 def get_stream_placeholder_jinja2(model_config: LiveConfigMixin) -> str:
     long = "'[' + ']['.join(message['long_context']).strip('[]') + ']'"
     visual = f"'[' + '{model_config.frame_token_interval}'.join([{model_config.frame_num_tokens} * '{model_config.v_placeholder}'] * message['num_frames']) + ']'"
     combined = f"({long} + {visual}).replace('[]', '')"
     return combined
 
+def get_stream_placeholder_interleave(model_config: LiveConfigMixin) -> str:
+    # long = f"'[{model_config.long_placeholder}' + '][{model_config.long_placeholder}'.join(message['long_context']).strip('[]') + ']'"
+    # visual = f"'[' + '{model_config.frame_token_interval}'.join([{model_config.frame_num_tokens} * '{model_config.v_placeholder}'] * message['num_frames']) + ']'"
+    long = f"'[{model_config.long_placeholder}' + '{model_config.frame_token_interval}{model_config.long_placeholder}'.join(message['long_context']).strip('[]')"
+    visual = f"'{model_config.frame_token_interval}' + '{model_config.frame_token_interval}'.join([{model_config.frame_num_tokens} * '{model_config.v_placeholder}'] * message['num_frames']) + ']'"
+    
+    combined = f"({long} + {visual}).replace('[]', '')"
+    return combined
 
 def get_stream_learn_ranges(
     num_frames: int, model_config: LiveConfigMixin
@@ -106,7 +125,7 @@ def chat_template_transition(tokenizer):
 def chat_template_offsets(tokenizer):
     return {k: len(v) for k, v in chat_template_transition(tokenizer).items()}
 
-
+############# Shih-Po's edition
 def get_learn_ranges(
     conversation: list[dict],
     *,
@@ -131,7 +150,11 @@ def get_learn_ranges(
                 if not isinstance(message["learn"], bool):
                     ranges = ranges[: message["learn"]]
                 learn_ranges.extend([range(r[0], r[1]) for r in ranges])
-            offset += get_stream_placeholder_len(message["num_frames"], model_config)
+            # offset += get_stream_placeholder_len(message["num_frames"], model_config)
+
+            ############# Shih-Po's implementation
+            long_context = message["long_context"]
+            offset += get_stream_interleave_placeholder_len(message["num_frames"], long_context, model_config)
         else:
             if role == "assistant":
                 if message.get("learn", False):
@@ -178,9 +201,15 @@ def build_live_tokenizer_and_update_config(
             eos_token_id=tokenizer.eos_token_id,
         )
     )
+    # tokenizer.chat_template = chat_template(
+    #     tokenizer, get_stream_placeholder_jinja2(model_config)
+    # )
+
+    ##### Shih-Po's edition
     tokenizer.chat_template = chat_template(
-        tokenizer, get_stream_placeholder_jinja2(model_config)
+        tokenizer, get_stream_placeholder_interleave(model_config)
     )
+
     tokenizer.get_learn_ranges = partial(
         get_learn_ranges,
         chat_template_offsets=chat_template_offsets(tokenizer),

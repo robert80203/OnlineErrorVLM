@@ -45,6 +45,7 @@ class ProVideLLMBaseTrainingArguments(TrainingArguments):
     frame_token_interval_threshold: float = 0.0
     frame_num_tokens: int = 1
     augmentation: bool = False
+    interleave: bool = False
     max_num_frames: int = 0
 
     N_s: int = 0
@@ -56,7 +57,8 @@ class ProVideLLMBaseTrainingArguments(TrainingArguments):
     output_dir: str = "outputs/debug"
     dataset_dir: str = "datasets/"
     pretrained_ckpt_path: str = None
-    override_output_dir: str = None
+    override_output_dir: str = None # manually set the checkpoint name
+
 
     def __post_init__(self):
         super().__post_init__()
@@ -67,8 +69,13 @@ class ProVideLLMBaseTrainingArguments(TrainingArguments):
         if self.fine_tune == "lora":
             self.lora_alpha = self.lora_r * 2
 
-        if self.frame_num_tokens > 1:
+        if "interleave" in self.model_variant: # assign here
             self.frame_token_interval = ","
+            self.N_l = 5
+            self.interleave = True
+        else:
+            if self.frame_num_tokens > 1:
+                self.frame_token_interval = ","
         if self.max_num_frames <= 0:
             self.max_num_frames = 7200 // (
                 self.frame_num_tokens + len(self.frame_token_interval)
@@ -112,6 +119,32 @@ class ProVideLLMBaseTrainingArguments(TrainingArguments):
 
             self.output_dir = os.path.join(outDir, ckpt_name)
 
+@dataclass
+class InterleaveProVideLLM1BTrainingArguments(ProVideLLMBaseTrainingArguments):
+    model_variant: str = "interleave_providellm_1b"
+    # llm
+    llm_pretrained: str = "meta-llama/Llama-3.2-1B-Instruct"
+    long_placeholder: str = "<L>"
+
+    # vision tower
+    vision_pretrained: str = "google/siglip2-base-patch16-384"
+    vision_hidden_size: int = 768
+    vision_num_tokens: int = 576
+    frame_token_cls: bool = True
+    frame_token_pooled: int = -1
+
+    # DETR Q-Former
+    connector_type: str = "detr_qformer"
+    compressed_tokens: int = 2
+    hand_tokens: int = 2
+    object_tokens: int = 4
+    learnable_tokens: int = compressed_tokens + 1 + 1
+    box_loss_weight: float = 1.0
+    connector_nhead: int = 8
+    connector_num_layers: int = 4
+    connector_hidden_dim: int = 128
+
+    frame_num_tokens: int = int(frame_token_cls) + learnable_tokens
 
 @dataclass
 class ProVideLLM1BTrainingArguments(ProVideLLMBaseTrainingArguments):
@@ -174,5 +207,7 @@ def get_args_class(args):
         return ProVideLLM1BTrainingArguments
     elif args.model_variant == "providellm_8b":
         return ProVideLLM8BTrainingArguments
-    else:
+    elif args.model_variant == "interleave_providellm_1b":
+        return InterleaveProVideLLM1BTrainingArguments
+    else: ########## declare new argument here and use model_variant to control
         raise NotImplementedError(f"[UNKNOWN MODEL!!!] {args.model_variant}")

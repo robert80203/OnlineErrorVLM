@@ -107,6 +107,10 @@ class LiveMixin(AutoModelForCausalLM):
         inputs_embeds = self.get_input_embeddings()(
             input_ids.clamp(max=self.vocab_size - 1)
         )
+        '''
+        if input_ids contain visual tokens (v_placeholder_id), generate its visual embedding
+        then inputs_embeds will contain with visual and textual embeddings, also generate active object bboxes
+        '''
         v_mask = input_ids == self.config.v_placeholder_id
         if v_mask.any():
             frames, det, meta = self.visual_embed(frames)
@@ -136,7 +140,7 @@ def build_live(
 
     model_id = llm_pretrained if pretrained_ckpt_path is None else pretrained_ckpt_path
 
-    config = config_class.from_pretrained(model_id, **kwargs)
+    config = config_class.from_pretrained(model_id, **kwargs) ### this step assigns vision_encoder from argument to configuration
     compute_dtype = (
         torch.float16
         if kwargs["fp16"]
@@ -152,7 +156,15 @@ def build_live(
     )
     tokenizer = build_live_tokenizer_and_update_config(model_id, model.config)
 
+
+    
+
     if is_training:
+        # Shih-Po's edition, load pre-trained weight for stage-2 training
+        if resume_from_checkpoint:
+            model = load_LiveLlamaForCausalLM(resume_from_checkpoint)
+            print(f"pretrained model loaded successfully from ", resume_from_checkpoint)
+
         if fine_tune == "lora":
             if not (model.base_model.__class__.__name__ == "LoraModel"):
                 finetune_modules = [
@@ -161,7 +173,7 @@ def build_live(
                 lora_config = LoraConfig(
                     r=lora_r,
                     lora_alpha=lora_alpha,
-                    target_modules=find_all_linear_names(model),
+                    target_modules=find_all_linear_names(model), # find all linear layesr, except for lm head
                     lora_dropout=0.05,
                     task_type="CAUSAL_LM",
                     modules_to_save=finetune_modules,
@@ -175,7 +187,23 @@ def build_live(
             print(f"Fine-tuning the connector only...")
         else:
             print("[WARNING!!!] Training the full VideoLLM end-to-end.")
+        
+        # Shih-Po's edition to avoid warning
+        # if not hasattr(model, "vision_encoder"):
+        #     model.attach_vision_tower(
+        #         attn_implementation,
+        #         torch_dtype=compute_dtype,
+        #     )
+        #     model.vision_encoder.requires_grad_(False)
     else:
+        # Shih-Po's edition to avoid warning
+        # if not hasattr(model, "vision_encoder"):
+        #     model.attach_vision_tower(
+        #         attn_implementation,
+        #         torch_dtype=compute_dtype,
+        #     )
+        #     model.vision_encoder.requires_grad_(False)
+        
         if resume_from_checkpoint:
             if fine_tune == "lora":
                 model = PeftModel.from_pretrained(

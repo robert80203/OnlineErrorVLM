@@ -5,6 +5,7 @@ from transformers import PreTrainedTokenizer
 from .utils import rand_bool, load_video, load_frames
 
 
+
 class StreamMixIn(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -12,6 +13,7 @@ class StreamMixIn(torch.utils.data.Dataset):
         system_prompt: str,
         augmentation: bool,
         max_num_frames: int,
+        interleave: bool,# shih-po's edition
         tokenizer: PreTrainedTokenizer,
         **kwargs,
     ):
@@ -21,6 +23,7 @@ class StreamMixIn(torch.utils.data.Dataset):
         self.augmentation = augmentation
         self.tokenizer = tokenizer
         self.max_num_frames = max_num_frames
+        self.interleave = interleave
         assert system_prompt is not None, "Please add a system prompt"
 
     # NOTE: this augmentation is to reduce the text dependency
@@ -212,18 +215,35 @@ class StreamMixIn(torch.utils.data.Dataset):
         else:
             frames = torch.tensor([])
 
-        if self.augmentation:
+        if self.augmentation: # default is false?
             conversation = self.augment(conversation)
 
         conversation = [
             {"role": "system", "content": self.system_prompt}
         ] + conversation
 
+        # print("conversation in stream.py", conversation)
+
         text = self.tokenizer.apply_chat_template(
             conversation,
             tokenize=False,
             add_generation_prompt=add_generation_prompt,
         )
+        '''
+        before tokenizer: [{'role': 'system', 'content': 'You are a multimodal AI assistant that helps users with their daily activities. Below is your conversation with the user, interleaved with the list of video frames provided by the user.'}, {'role': 'user', 'content': 'Describe the activity step being performed in the video. Format your answer concisely. No extra text output.'}, {'role': 'stream', 'learn': True, 'num_frames': 8, 'long_context': ['']}, {'role': 'assistant', 'content': 'read the instructions', 'learn': True}]
+        
+        after tokenizer: User: Describe the activity step being performed in the video. Format your answer concisely. No extra text output. [<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>,<v><v><v><v><v>] Assistant: read the instructions<|eot_id|>
+        '''
+        if self.interleave: # shuffle interleave cache
+            tokens = text.split("\n")
+            interleave_cache = tokens[3]
+            interleave_tokens = interleave_cache.split(',')
+            interleave_tokens[0] = interleave_tokens[0][1:]
+            interleave_tokens[-1] = interleave_tokens[-1][:-1]
+            random.shuffle(interleave_tokens)
+            interleave_cache = "[" + ",".join(interleave_tokens) + "]"
+            text = tokens[0] + "\n\n" + tokens[2] + "\n" + interleave_cache + "\n" + tokens[4]
+            
 
         learn_ranges = (
             self.tokenizer.get_learn_ranges(conversation)

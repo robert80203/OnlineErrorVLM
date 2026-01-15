@@ -9,6 +9,13 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from torchcodec.decoders import VideoDecoder
 from torchaudio.utils import ffmpeg_utils
+from typing import Dict, List, Tuple
+from collections import defaultdict
+
+# These imports come from pycocoevalcap
+from pycocoevalcap.bleu.bleu import Bleu
+from pycocoevalcap.cider.cider import Cider
+from pycocoevalcap.spice.spice import Spice
 
 from ..utils import DictWithTo
 
@@ -21,6 +28,7 @@ np.random.seed(42)
 ffmpeg_utils.set_log_level(-8)
 
 
+
 class EgoClipStage1(EgoClip, StreamMixIn):
     evaluation_kwargs = DictWithTo(
         evaluator="generate_after_embed",
@@ -31,6 +39,7 @@ class EgoClipStage1(EgoClip, StreamMixIn):
         top_p=1.0,
     )
     crop_with_boxes = None
+
     ego_prompts = [
         {"role": "user", "content": "What am I doing in the video?"},
         {"role": "user", "content": "What is the camera wearer doing in the video?"},
@@ -76,8 +85,15 @@ class EgoClipStage1(EgoClip, StreamMixIn):
         self.anno_fps = 30
         self.num_samples = num_samples
         self.transform = transform
-
+        
         print(f"Total {self.split} samples: {len(self.annos)}")
+
+        # Shih-Po's edition
+        self.gt_responses = []
+        for i in range(len(self.annos)):
+            sample = self.annos.iloc[i]
+            response = sample["clip_text"]
+            self.gt_responses.append(self.clean_response(response))
 
     def __getitem__(self, index):
         sample = self.annos.iloc[index]
@@ -130,6 +146,11 @@ class EgoClipStage1(EgoClip, StreamMixIn):
         text = text.replace("#C C", "The person")
         text = text.replace("#C ", "the person")
         text = text.replace("#O ", "")
+
+        # Shih-Po's edition
+        text = text.replace("# C C", "The person")
+        text = text.replace("#c c", "The person")
+        text = text.replace("C C", "The person")
 
         # 2. Collapse multiple spaces created by removals
         text = re.sub(r"\s+", " ", text).strip()
@@ -213,6 +234,14 @@ class EgoClipStage1(EgoClip, StreamMixIn):
             device=boxes.device,
         )
 
+        if np.isnan(boxes).any():
+            hand_boxes = torch.zeros(4, 2, 4)
+            obj_boxes = torch.zeros(4, 4, 4)
+            boxes = torch.cat([hand_boxes, obj_boxes], 1)
+            success = 0
+            # print("Found Nan bbox")
+            # print(boxes)
+        
         return boxes, success
 
     def get_video_frames(
@@ -261,11 +290,109 @@ class EgoClipStage1(EgoClip, StreamMixIn):
             raise ValueError("Transform must be provided for video frames.")
 
         return frames, crop_params, valid, seconds
+    
 
+    def prepare_data_for_coco_eval(
+        self,
+        predictions: Dict[str, str],
+        references: Dict[str, List[str]],
+    ):
+        """
+        Convert dictionaries into the format expected by pycocoevalcap:
+        - gts: dict[image_id] -> list of reference strings
+        - res: dict[image_id] -> list of hypothesis strings (usually len==1)
+        """
+        gts = {}
+        res = {}
 
+        for img_id, refs in references.items():
+            # ground truths: list of reference captions
+            gts[img_id] = [r.strip() for r in refs]
+
+        for img_id, pred in predictions.items():
+            # result: list containing a single prediction string
+            res[img_id] = [pred.strip()]
+
+        return gts, res
+
+    ### Shih-Po's edition
+    def compute_bleu_cider_spice(self, predictions, references):
+        """
+        Compute BLEU-4, CIDEr, SPICE over the dataset.
+        Returns a dict with:
+        - 'BLEU-4'
+        - 'CIDEr'
+        - 'SPICE'
+        """
+        preds, res = self.prepare_data_for_coco_eval(predictions, references)
+        # ----------------------
+        # BLEU (1-4)
+        # ----------------------
+        bleu_scorer = Bleu(n=4)
+        bleu_scores, _ = bleu_scorer.compute_score(preds, res)
+        # bleu_scores is a list of scores for BLEU-1,2,3,4
+
+        # ----------------------
+        # CIDEr
+        # ----------------------
+        cider_scorer = Cider()
+        cider_score, _ = cider_scorer.compute_score(preds, res)
+
+        # ----------------------
+        # SPICE, which needs java
+        # ----------------------
+        # spice_scorer = Spice()
+        # spice_score, spice_scores_per_image = spice_scorer.compute_score(preds, res)
+
+        metrics = {
+            "BLEU-4": bleu_scores[3] * 100,
+            "CIDEr": cider_score * 100,
+            # "SPICE": spice_score * 100,
+        }
+
+        return metrics
+    
+    ### Shih-Po's edition, from egoexo4d
+    def compute_metrics(
+        self, eval_predictions: EvalPrediction, tokenizer: PreTrainedTokenizer, **kwargs
+    ):
+        out_dir = kwargs["output_dir"]
+        batch_pred_tensor, sample_idxs = (
+            eval_predictions.predictions,
+            eval_predictions.label_ids,
+        )
+        batch_pred_tensor[batch_pred_tensor < 0] = tokenizer.bos_token_id
+        predictions = tokenizer.batch_decode(
+            batch_pred_tensor,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True,
+        )
+
+        with open(f"{out_dir}/preds.txt", "w") as f_pred:
+            f_pred.write("\n".join(predictions))
+
+        with open(f"{out_dir}/gts.txt", "w") as f_gt:
+            f_gt.write("\n".join(self.gt_responses))
+
+        dict_references = {}
+        dict_predictions = {}
+        i = 1
+        for pred, ref in zip(predictions, self.gt_responses):
+            dict_predictions[i] = pred
+            dict_references[i] = [ref]
+            i += 1
+
+        output_json = self.compute_bleu_cider_spice(dict_predictions, dict_references)
+
+        with open(f"{out_dir}/eval_results.json", "w") as f_output:
+            json.dump(output_json, f_output)
+        
+        return output_json
 def build_egoclip_stage1(**kwargs):
     return EgoClipStage1(split="train", **kwargs)
 
+def build_egoclip_stage1_val(**kwargs):
+    return EgoClipStage1(split="val", **kwargs)
 
 def load_bboxes(hand_info, ind, box_type="hand_dets", threshold=0.5):
     ind = ind % 600

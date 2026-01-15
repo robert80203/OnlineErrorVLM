@@ -11,10 +11,10 @@ from torchcodec.decoders import VideoDecoder
 from ..stream import StreamMixIn
 from ..utils import DictWithTo, fixed_sampling
 
-from .egoexo4d import EGOEXO4D
+from .egoper import EgoPER
 
 
-class EGOEXO4DBenchmark(EGOEXO4D, StreamMixIn):
+class EgoPERBenchmark(EgoPER, StreamMixIn):
     evaluation_kwargs = DictWithTo(
         evaluator="generate_after_embed",
         max_new_tokens=512,
@@ -87,13 +87,14 @@ class EGOEXO4DBenchmark(EGOEXO4D, StreamMixIn):
             [self.fuzzy_match(text, self.mapping_categories) for text in predictions]
         )
         accuracy = (predictions == np.array(self.answers)).mean()
+
         return dict(accuracy=accuracy * 100)
 
     def __sample_frames(self, start, end, video_uid, fps, length):
         fps_ratio = fps / self.anno_fps
         assert (
             self.num_samples > 0
-        ), f"EgoExo4D Keystep benchmark required fixed frame sample. Set num_samples > 0. Currently num_samples = {self.num_samples}"
+        ), f"EgoPER Keystep benchmark required fixed frame sample. Set num_samples > 0. Currently num_samples = {self.num_samples}"
 
         frames = fixed_sampling(self.split, self.num_samples, start, end)
         frames = (frames * fps_ratio).astype(int)
@@ -107,8 +108,10 @@ class EGOEXO4DBenchmark(EGOEXO4D, StreamMixIn):
         frames = anno.pop("frames")
         video_path = anno.pop("video_path")
 
-        vpath = os.path.join(video_path, "frame_aligned_videos/downscaled/448")
-        videos = [f for f in os.listdir(vpath) if "214-1" in f and f.endswith(".mp4")]
+        # vpath = os.path.join(video_path, "frame_aligned_videos/downscaled/448")
+        # videos = [f for f in os.listdir(vpath) if "214-1" in f and f.endswith(".mp4")]
+        vpath = os.path.join(video_path)
+        videos = [vpath]
         if len(videos) == 0:
             raise FileNotFoundError(f"No video found in {vpath} for index {index}.")
         else:
@@ -141,7 +144,7 @@ class EGOEXO4DBenchmark(EGOEXO4D, StreamMixIn):
         )
 
 
-class EGOEXO4DKeystep(EGOEXO4DBenchmark):
+class EgoPERKeystep(EgoPERBenchmark):
     random.seed(42)
 
     def __init__(
@@ -216,21 +219,14 @@ class EGOEXO4DKeystep(EGOEXO4DBenchmark):
         print(f"Total {self.split} samples: {len(self.annos)}")
 
 
-def build_egoexo4d_keystep_train(**kwargs):
-    return EGOEXO4DKeystep(split="train", **kwargs)
+def build_egoper_keystep_train(**kwargs):
+    return EgoPERKeystep(split="train", **kwargs)
 
 
-def build_egoexo4d_keystep_trainval(**kwargs):
-    return EGOEXO4DKeystep(split="trainval", **kwargs)
+def build_egoper_keystep_val(**kwargs):
+    return EgoPERKeystep(split="val", **kwargs)
 
 
-def build_egoexo4d_keystep_val(**kwargs):
-    return EGOEXO4DKeystep(split="val", **kwargs)
+def build_egoper_keystep_test(**kwargs):
+    return EgoPERKeystep(split="test", **kwargs)
 
-
-def build_egoexo4d_keystep_test(**kwargs):
-    return EGOEXO4DKeystep(split="test", **kwargs)
-
-
-def build_egoexo4d_keystep_debug(**kwargs):
-    return EGOEXO4DKeystep(split="debug", **kwargs)

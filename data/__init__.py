@@ -3,6 +3,7 @@ from functools import partial
 from torch.utils.data import ConcatDataset, Dataset
 
 # all datasets loaded here
+from .egoper import *
 from .egoexo4d import *
 from .ego4d import *
 from .coin import *

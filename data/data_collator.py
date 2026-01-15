@@ -32,6 +32,14 @@ def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs
             batch.input_ids, LabelSmoother.ignore_index, dtype=torch.long
         )
 
+        # print(batch_text, len(batch_text))
+        # print(batch.input_ids)
+        # print(batch_learn_ranges)
+        
+        # print("labels", batch_labels.size())
+        # print("input ids", batch.input_ids.size())
+        ############### debugging labels
+        # here
         for text, labels, input_ids, offset_mapping, learn_range in zip(
             batch_text,
             batch_labels,
@@ -63,6 +71,8 @@ def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs
                         stop = stop + 1 if stop < len(input_ids) else start - 1
                 else:  # the last eos token
                     stop = len(input_ids)
+                # print(labels.size(), input_ids.size())
+                # print(start, stop)
                 labels[start - 1 : stop - 1] = input_ids[start:stop]
                 # NOTE: input_ids may out of boundary of len(tokenizer) - 1. (1 is the added vision placeholder)
                 # this is because some frames has v_placeholder_id target. so replace it with eos token.
@@ -72,10 +82,13 @@ def data_collator(batch: list[list], *, tokenizer: PreTrainedTokenizer, **kwargs
                 if stop == len(input_ids):
                     output[-1].append(labels)
 
+        # print("after", batch_labels, len(batch_labels[0]))
+
         batch["labels"] = batch_labels
         batch.pop("offset_mapping")
 
     batch["frames"] = torch.cat(batch_frames)
+
     if batch_bboxes[0] is not None:
         batch["bboxes"] = torch.cat(batch_bboxes, dim=0)
     else:
